@@ -44,13 +44,12 @@ export async function POST(req) {
       );
     }
 
-    // Baca isi file sepenuhnya ke memori
+    // Baca seluruh isi file ke memori
     const bytes = await file.arrayBuffer();
     if (bytes.byteLength === 0) {
       return Response.json({ error: "Isi file kosong" }, { status: 400 });
     }
 
-    // Tipe konten harus sesuai jenis file yang diterima Roblox
     let mime;
     if (type === "image") {
       mime = file.type && file.type.startsWith("image/") ? file.type : "image/png";
@@ -80,7 +79,20 @@ export async function POST(req) {
 
     if (!up.ok) {
       const t = await up.text();
-      return Response.json({ error: `Roblox ${up.status}: ${t}` }, { status: 502 });
+      return Response.json(
+        {
+          error: `Roblox ${up.status}: ${t}`,
+          debug: {
+            fileName: file.name,
+            fileSizeFromForm: file.size,
+            sentBytes: bytes.byteLength,
+            mime,
+            assetType,
+            userId: String(user.roblox_id),
+          },
+        },
+        { status: 502 }
+      );
     }
 
     const op = await up.json();
