@@ -2,7 +2,7 @@ import { getSessionUser, db } from "@/lib/session";
 import { decrypt } from "@/lib/crypto";
 
 const FREE_LIMIT = 3;
-const MAX_BYTES = 4 * 1024 * 1024; // batas body Vercel sekitar 4,5 MB
+const MAX_BYTES = 4 * 1024 * 1024;
 
 export async function POST(req) {
   try {
@@ -44,22 +44,26 @@ export async function POST(req) {
       );
     }
 
+    // Baca isi file sepenuhnya ke memori supaya tidak terkirim kosong
+    const bytes = await file.arrayBuffer();
+    if (bytes.byteLength === 0) {
+      return Response.json({ error: "Isi file kosong" }, { status: 400 });
+    }
+    const fileBlob = new Blob([bytes], { type: "application/octet-stream" });
+
     const assetType = type === "image" ? "Decal" : "Model";
     const displayName = name || file.name || "upload";
 
     const fd = new FormData();
     fd.append(
       "request",
-      new Blob(
-        [JSON.stringify({
-          assetType,
-          displayName,
-          creationContext: { creator: { userId: String(user.roblox_id) } },
-        })],
-        { type: "application/json" }
-      )
+      JSON.stringify({
+        assetType,
+        displayName,
+        creationContext: { creator: { userId: String(user.roblox_id) } },
+      })
     );
-    fd.append("fileContent", file, file.name || "upload");
+    fd.append("fileContent", fileBlob, file.name || "upload.rbxm");
 
     const up = await fetch("https://apis.roblox.com/assets/v1/assets", {
       method: "POST",
@@ -69,10 +73,7 @@ export async function POST(req) {
 
     if (!up.ok) {
       const t = await up.text();
-      return Response.json(
-        { error: `Roblox ${up.status}: ${t}` },
-        { status: 502 }
-      );
+      return Response.json({ error: `Roblox ${up.status}: ${t}` }, { status: 502 });
     }
 
     const op = await up.json();
@@ -80,7 +81,6 @@ export async function POST(req) {
       return Response.json({ error: "Roblox tidak mengembalikan operationId" }, { status: 502 });
     }
 
-    // Catat upload sebagai pending supaya ikut dihitung di batas harian
     await sql`insert into uploads (user_id, op_id, status)
               values (${user.id}, ${op.operationId}, 'pending')`;
 
