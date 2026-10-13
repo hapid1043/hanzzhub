@@ -49,7 +49,15 @@ export async function POST(req) {
     if (bytes.byteLength === 0) {
       return Response.json({ error: "Isi file kosong" }, { status: 400 });
     }
-    const fileBlob = new Blob([bytes], { type: "application/octet-stream" });
+
+    // Tipe konten harus sesuai jenis file yang diterima Roblox
+    let mime;
+    if (type === "image") {
+      mime = file.type && file.type.startsWith("image/") ? file.type : "image/png";
+    } else {
+      mime = "model/x-rbxm";
+    }
+    const fileBlob = new Blob([bytes], { type: mime });
 
     const assetType = type === "image" ? "Decal" : "Model";
     const displayName = name || file.name || "upload";
