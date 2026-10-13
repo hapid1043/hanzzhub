@@ -44,7 +44,7 @@ export async function POST(req) {
       );
     }
 
-    // Baca isi file sepenuhnya ke memori supaya tidak terkirim kosong
+    // Baca isi file sepenuhnya ke memori
     const bytes = await file.arrayBuffer();
     if (bytes.byteLength === 0) {
       return Response.json({ error: "Isi file kosong" }, { status: 400 });
@@ -54,15 +54,14 @@ export async function POST(req) {
     const assetType = type === "image" ? "Decal" : "Model";
     const displayName = name || file.name || "upload";
 
+    const requestJson = JSON.stringify({
+      assetType,
+      displayName,
+      creationContext: { creator: { userId: String(user.roblox_id) } },
+    });
+
     const fd = new FormData();
-    fd.append(
-      "request",
-      JSON.stringify({
-        assetType,
-        displayName,
-        creationContext: { creator: { userId: String(user.roblox_id) } },
-      })
-    );
+    fd.append("request", new Blob([requestJson], { type: "application/json" }));
     fd.append("fileContent", fileBlob, file.name || "upload.rbxm");
 
     const up = await fetch("https://apis.roblox.com/assets/v1/assets", {
