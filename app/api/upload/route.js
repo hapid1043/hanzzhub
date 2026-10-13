@@ -4,6 +4,30 @@ import { decrypt } from "@/lib/crypto";
 const FREE_LIMIT = 3;
 const MAX_BYTES = 4 * 1024 * 1024;
 
+function buildMultipart(requestJson, fileBytes, fileName, mime) {
+  const boundary = "----hz" + crypto.randomUUID().replace(/-/g, "");
+  const enc = new TextEncoder();
+  const safeName = fileName.replace(/[^\x20-\x7e]|"/g, "_");
+
+  const head1 = enc.encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="request"\r\nContent-Type: application/json\r\n\r\n`
+  );
+  const reqBytes = enc.encode(requestJson);
+  const head2 = enc.encode(
+    `\r\n--${boundary}\r\nContent-Disposition: form-data; name="fileContent"; filename="${safeName}"\r\nContent-Type: ${mime}\r\n\r\n`
+  );
+  const tail = enc.encode(`\r\n--${boundary}--\r\n`);
+
+  const total = head1.length + reqBytes.length + head2.length + fileBytes.length + tail.length;
+  const body = new Uint8Array(total);
+  let off = 0;
+  for (const part of [head1, reqBytes, head2, new Uint8Array(fileBytes), tail]) {
+    body.set(part, off);
+    off += part.length;
+  }
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
 export async function POST(req) {
   try {
     const user = await getSessionUser(req);
@@ -44,19 +68,15 @@ export async function POST(req) {
       );
     }
 
-    // Baca seluruh isi file ke memori
-    const bytes = await file.arrayBuffer();
+    const bytes = new Uint8Array(await file.arrayBuffer());
     if (bytes.byteLength === 0) {
       return Response.json({ error: "Isi file kosong" }, { status: 400 });
     }
 
-    let mime;
-    if (type === "image") {
-      mime = file.type && file.type.startsWith("image/") ? file.type : "image/png";
-    } else {
-      mime = "model/x-rbxm";
-    }
-    const fileBlob = new Blob([bytes], { type: mime });
+    const mime =
+      type === "image"
+        ? file.type && file.type.startsWith("image/") ? file.type : "image/png"
+        : "model/x-rbxm";
 
     const assetType = type === "image" ? "Decal" : "Model";
     const displayName = name || file.name || "upload";
@@ -67,32 +87,22 @@ export async function POST(req) {
       creationContext: { creator: { userId: String(user.roblox_id) } },
     });
 
-    const fd = new FormData();
-    fd.append("request", new Blob([requestJson], { type: "application/json" }));
-    fd.append("fileContent", fileBlob, file.name || "upload.rbxm");
+    const { body, contentType } = buildMultipart(
+      requestJson,
+      bytes,
+      file.name || "upload.rbxm",
+      mime
+    );
 
     const up = await fetch("https://apis.roblox.com/assets/v1/assets", {
       method: "POST",
-      headers: { "x-api-key": apiKey },
-      body: fd,
+      headers: { "x-api-key": apiKey, "Content-Type": contentType },
+      body,
     });
 
     if (!up.ok) {
       const t = await up.text();
-      return Response.json(
-        {
-          error: `Roblox ${up.status}: ${t}`,
-          debug: {
-            fileName: file.name,
-            fileSizeFromForm: file.size,
-            sentBytes: bytes.byteLength,
-            mime,
-            assetType,
-            userId: String(user.roblox_id),
-          },
-        },
-        { status: 502 }
-      );
+      return Response.json({ error: `Roblox ${up.status}: ${t}` }, { status: 502 });
     }
 
     const op = await up.json();
